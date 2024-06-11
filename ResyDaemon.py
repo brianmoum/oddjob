@@ -2,6 +2,7 @@ from bs4 import BeautifulSoup
 import pandas as pd, requests, io, re, csv, datetime, sys, json, html
 
 import time 
+from datetime import date
  
 import pandas as pd 
 from selenium import webdriver 
@@ -17,7 +18,7 @@ from selenium.webdriver.support import expected_conditions as EC
 # specifically removing the headless option which actually loaded the page in a window, and received a new error which seems to suggest that the behavior of the script in its current form can be identified by the page as a bot, and is being
 # kicked out. Need to look into and implement evasion methods as described here: https://stackoverflow.com/questions/71885891/urllib3-exceptions-maxretryerror-httpconnectionpoolhost-localhost-port-5958. *****
 
-
+## Look into Scrapy for polite Spider to potentially circumvent bot detection: https://docs.scrapy.org/en/latest/intro/overview.html
 
 def getPage(url, attempt=0) :
 
@@ -34,26 +35,38 @@ def getPage(url, attempt=0) :
 
 	driver = Chrome(options=options, service=chrome_service)
 
-	## Need to add explicit wait to driver; currently failing attempts to grab reservation buttos because the elements have not loaded yet
-
-
 	driver.get(url)
 	selector = ""
-	## Content should use driver to pull desired elements. Need to inspect pages to determine what to pull. MLB REF was standard but for this might need to make dynamic somehow
-	element = None
-	try :
-		element = WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, "ShiftInventory__shift")))
-	finally :
-		driver.quit()
-	#wrapper = driver.find_element(by=By.CLASS_NAME, value="ShiftInventory__shift--last")
 
-	return element
+	container = None
+	container = WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.CLASS_NAME, "ShiftInventory__shift")))
+
+	buttons = container.find_elements(By.CSS_SELECTOR, ".ReservationButton")
+
+	## TODO: function to take input of time preference and available times, and return sorted list of preferred times
+
+	for b in buttons :
+		if "6:00 PM" in b.text :
+			b.click()
+			time.sleep(5)
+
+
+	return buttons
 
 def main() :
+	today = date.today()
+	datestring = "{0}-{1}-{2}".format(today.year, today.month, today.day)
+
 	url1 = "https://resy.com/"
-	url2 = "https://resy.com/cities/new-york-ny/venues/le-gratin?seats=2&date=2024-04-30"
+	url2 = "https://resy.com/cities/new-york-ny/venues/le-gratin?seats=2&date={0}".format(datestring)
 	content = getPage(url2)
-	print(content.text)
+
+	print(content)
+	for c in content :
+		if "6:00 PM" in c.text :
+
+			print(c.text)
+
 
 
 main()
