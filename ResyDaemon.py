@@ -178,9 +178,7 @@ def getPage(url, preferred_times, attempt=0) :
 		for b in button_keys :
 			if t in b :
 				mt = toMilitaryTime(t)
-				print(mt)
 				button = driver.find_element(By.CSS_SELECTOR, ".ReservationButton[id*='{0}']".format(mt))
-				print(button.text)
 				button.click()
 
 				done = True
@@ -212,9 +210,7 @@ def getPage(url, preferred_times, attempt=0) :
 	#login = WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.CLASS_NAME, "Button--login")))
 	#login.click()
 	cont = driver.find_element(By.CLASS_NAME, "AuthContainer")
-	print(cont.text)
 	auth_container = WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.CLASS_NAME, "AuthContainer")))
-	print(auth_container.text)
 	un_pw_container = WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.CLASS_NAME, "AuthView__Footer")))
 	un_pw_button = un_pw_container.find_element(By.CSS_SELECTOR, "button")
 	un_pw_button.click()
@@ -235,17 +231,23 @@ def getPage(url, preferred_times, attempt=0) :
 	time.sleep(5)
 
 def main() :
-	best = "7:00"
-	early = "6:00"
-	late = "9:30"
+
+	## INPUTS FOR RESERVATION DETAILS ##
+
+	best = "7:00" ## Ideal time (will try to get as close to this time as possible)
+	early = "6:00" ## Earliest possible time
+	late = "9:30" ## latest possible time
+	restaurant_url_code = "loulou" ## Name of Restaurant (type carefully)
+	res_date = date.today() ## Date of Reservation
+	num_people = 2 ## Number of people attending
+
 	arr = getPreferredTimes(best, early, late)
 	print(arr)
 
-	today = date.today()
-	datestring = "{0}-{1}-{2}".format(today.year, today.month, today.day)
+	datestring = "{0}-{1}-{2}".format(res_date.year, res_date.month, res_date.day)
 
 	url1 = "https://resy.com/"
-	url2 = "https://resy.com/cities/new-york-ny/venues/loulou?seats=2&date={0}".format(datestring)
+	url2 = "https://resy.com/cities/new-york-ny/venues/{1}?seats=2&date={0}".format(datestring, restaurant_url_code)
 	content = getPage(url2, arr)
 
 	print(content)
