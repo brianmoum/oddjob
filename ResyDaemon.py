@@ -17,10 +17,10 @@ import json, sys, math
 import ResyTimeFunctions as rtf
 
 
-## Look into Scrapy for polite Spider to potentially circumvent bot detection: https://docs.scrapy.org/en/latest/intro/overview.html
+## TODO: Look into Scrapy for polite Spider to potentially circumvent bot detection: https://docs.scrapy.org/en/latest/intro/overview.html
 
 def getPreferredTimes(best, earliest, latest) :
-
+	## Creating array of every time within defined range, and ordering array from most preferred to least preferred (starting from "best time" and moving outward both earlier and later in increments of 15 mins until upper and lower boundaries are reached). ##
 	preferred_times = []
 
 	n_best = rtf.timeToFloat(best)
@@ -68,6 +68,7 @@ def getPage(url, preferred_times, attempt=0) :
 	selector = ""
 
 	## Find best Reservation and click time button ##
+
 	container = WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.CLASS_NAME, "ShiftInventory__shift--last")))
 	buttons = container.find_elements(By.CSS_SELECTOR, ".ReservationButton")
 
@@ -94,6 +95,7 @@ def getPage(url, preferred_times, attempt=0) :
 	reserve_now = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "Button.Button--primary.Button--lg")))
 	reserve_now.click()
 
+	## Found issue where UI asks clarifying questions (e.g. 'confirm you want to sit outside'), so need to click button repeatedly until menu advances ##
 	try:
 		reserve_now = driver.find_element(By.CSS_SELECTOR, "Button.Button--primary.Button--lg")
 
