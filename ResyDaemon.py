@@ -3,8 +3,7 @@ import pandas as pd, requests, io, re, csv, datetime, sys, json, html
 
 import time 
 from datetime import date
- 
-import pandas as pd 
+
 from selenium import webdriver 
 from selenium.webdriver import Chrome 
 from selenium.webdriver.chrome.service import Service 
