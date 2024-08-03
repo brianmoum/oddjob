@@ -16,42 +16,29 @@ from selenium.webdriver.support import expected_conditions as EC
 
 import ResyTimeFunctions as rtf
 import ResyRestaurantLookup as rrl
+import ResyDaemon as rd
 
-class HelloFrame(wx.Frame):
-    """
-    A Frame that says Hello World
-    """
-
-    def __init__(self, *args, **kw):
-        # ensure the parent's __init__ is called
-        super(HelloFrame, self).__init__(*args, **kw)
-
-        # create a panel in the frame
-        pnl = wx.Panel(self)
-
-        # put some text with a larger bold font on it
-        st = wx.StaticText(pnl, label="Oddjob Resy Concierge")
-        but1 = wx.Button(pnl, label="Button 1")
-        font = st.GetFont()
-        font.PointSize += 10
-        font = font.Bold()
-        st.SetFont(font)
-
-        # and create a sizer to manage the layout of child widgets
-        sizer = wx.BoxSizer(wx.VERTICAL)
-        sizer.Add(st, wx.SizerFlags().Border(wx.TOP|wx.LEFT, 25))
-        pnl.SetSizer(sizer)
+def main() :
 
 
-    def OnExit(self, event):
-        """Close the frame, terminating the application."""
-        self.Close(True)
+    ## *** CONFIG ** ##
 
+    ## INPUTS FOR RESERVATION DETAILS ##
 
-if __name__ == '__main__':
-    # When this module is run (not imported) then create the app, the
-    # frame, show it, and start the event loop.
-    app = wx.App()
-    frm = HelloFrame(None, title='Hello World 2')
-    frm.Show()
-    app.MainLoop()
+    best = "7:00" ## Ideal time (will try to get as close to this time as possible)
+    early = "6:00" ## Earliest possible time
+    late = "9:30" ## latest possible time
+    restaurant_url_code = "loulou" ## Name of Restaurant (type carefully)
+    res_date = date.today() ## Date of Reservation (use date.today() for current date)
+    num_people = 2 ## Number of people attending
+
+    arr = rd.getPreferredTimes(best, early, late)
+    print(arr)
+
+    datestring = "{0}-{1}-{2}".format(res_date.year, res_date.month, res_date.day)
+
+    url1 = "https://resy.com/"
+    url2 = "https://resy.com/cities/new-york-ny/venues/{1}?seats=2&date={0}".format(datestring, restaurant_url_code)
+    content = rd.getPage(url2, arr)
+
+main()

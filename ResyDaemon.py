@@ -132,27 +132,3 @@ def getPage(url, preferred_times, attempt=0) :
 	login_button.click()
 
 	time.sleep(5)
-
-def main() :
-
-	## INPUTS FOR RESERVATION DETAILS ##
-
-	best = "7:00" ## Ideal time (will try to get as close to this time as possible)
-	early = "6:00" ## Earliest possible time
-	late = "9:30" ## latest possible time
-	restaurant_url_code = "loulou" ## Name of Restaurant (type carefully)
-	res_date = date.today() ## Date of Reservation
-	num_people = 2 ## Number of people attending
-
-	arr = getPreferredTimes(best, early, late)
-	print(arr)
-
-	datestring = "{0}-{1}-{2}".format(res_date.year, res_date.month, res_date.day)
-
-	url1 = "https://resy.com/"
-	url2 = "https://resy.com/cities/new-york-ny/venues/{1}?seats=2&date={0}".format(datestring, restaurant_url_code)
-	content = getPage(url2, arr)
-
-
-
-main()
