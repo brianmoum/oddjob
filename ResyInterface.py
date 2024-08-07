@@ -37,7 +37,7 @@ def main() :
     early = "6:00" ## Earliest possible time
     late = "9:30" ## latest possible time
     restaurant_url_code = "lartusi-ny" ## Name of Restaurant (type carefully)
-    res_date = date.today() ## Date of Reservation (use date.today() for current date)
+    res_date = "2024-08-15" ## Date of Reservation (use format "YYYY-MM-DD")
     num_people = 4 ## Number of people attending
 
     ## RUNTIME DETAILS ##
@@ -60,7 +60,7 @@ def main() :
     arr = rd.getPreferredTimes(best, early, late)
     print(arr)
 
-    datestring = "{0}-{1}-{2}".format(res_date.year, res_date.month, res_date.day)
+    datestring = res_date
 
     url1 = "https://resy.com/"
     url2 = "https://resy.com/cities/new-york-ny/venues/{1}?seats={2}&date={0}".format(datestring, restaurant_url_code, num_people)

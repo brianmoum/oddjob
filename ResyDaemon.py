@@ -54,9 +54,7 @@ def getPage(url, preferred_times, attempt=0) :
    		auth = json.load(f)
 
 
-
 	## Options for webdriver ##
-
 
 	options = webdriver.ChromeOptions()
 	options.add_argument('--disable-blink-features=AutomationControlled')
@@ -67,11 +65,8 @@ def getPage(url, preferred_times, attempt=0) :
 	## NOTE: below driver config worked initially but started to throw errors. Swapped for standard Chrome driver and that seemed to work
 	#driver = Chrome(options=options, service=chrome_service)
 	driver = Chrome()
-	print("checkpoint")
 	driver.get(url)
 	selector = ""
-
-
 
 	## Find best Reservation and click time button ##
 
@@ -85,10 +80,16 @@ def getPage(url, preferred_times, attempt=0) :
 
 	if len(buttons) <= 0 :
 		print("no times available on page.")
-		sys.exit()
+		attempt += 1
+		if attempt >= 5 :
+			print("Could not find any available times. Exiting function.")
+			driver.close()
+			return None
+		elif attempt < 5 :
+			driver.close()
+			content = getPage(url, preferred_times, attempt)
 	else :
 		print("times found")
-		sys.exit()
 
 	button_keys = []
 	for b in buttons :
