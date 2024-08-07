@@ -53,7 +53,10 @@ def getPage(url, preferred_times, attempt=0) :
 	with open('config.json') as f:
    		auth = json.load(f)
 
+
+
 	## Options for webdriver ##
+
 
 	options = webdriver.ChromeOptions()
 	options.add_argument('--disable-blink-features=AutomationControlled')
@@ -61,15 +64,31 @@ def getPage(url, preferred_times, attempt=0) :
 	chrome_path = ChromeDriverManager().install()
 	chrome_service = Service(chrome_path)
 
-	driver = Chrome(options=options, service=chrome_service)
-
+	## NOTE: below driver config worked initially but started to throw errors. Swapped for standard Chrome driver and that seemed to work
+	#driver = Chrome(options=options, service=chrome_service)
+	driver = Chrome()
+	print("checkpoint")
 	driver.get(url)
 	selector = ""
 
+
+
 	## Find best Reservation and click time button ##
 
+	## NOTE: There are multiple "ShiftInventory" elements on the page for each service window (Brunch, Lunch, Dinner, etc.). Currently the "container" variable should always grab the element with "Dinner"
+	## since the element being grabbed is explicitly the last "ShiftInventory" on the page ("ShiftInventory__shift--last"). Need to make this dynamic if we want to add functionality to enable user to
+	## reserve other service windows.
+
 	container = WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.CLASS_NAME, "ShiftInventory__shift--last")))
+
 	buttons = container.find_elements(By.CSS_SELECTOR, ".ReservationButton")
+
+	if len(buttons) <= 0 :
+		print("no times available on page.")
+		sys.exit()
+	else :
+		print("times found")
+		sys.exit()
 
 	button_keys = []
 	for b in buttons :
@@ -132,3 +151,4 @@ def getPage(url, preferred_times, attempt=0) :
 	login_button.click()
 
 	time.sleep(5)
+
