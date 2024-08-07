@@ -1,5 +1,3 @@
-import wx
-
 import pandas as pd, requests, io, re, csv, datetime, sys, json, html, math
 
 import time
@@ -31,6 +29,21 @@ def main() :
     restaurant_url_code = "loulou" ## Name of Restaurant (type carefully)
     res_date = date.today() ## Date of Reservation (use date.today() for current date)
     num_people = 2 ## Number of people attending
+
+    ## RUNTIME DETAILS ##
+    # TODO: Once cloud infra is set need to add a date field here
+    day = date.today()
+    t_test = "13:40:00"
+    t_lartusi = "08:59:58"
+
+    ## live time variable ##
+    t = t_test
+    ## live time variable ##
+
+    runtime = time.strptime("{0} {1}".format(day, t), "%Y-%m-%d %H:%M:%S")
+    runtime_epoch = time.mktime(runtime)
+    print(runtime)
+    print(runtime_epoch)
 
     arr = rd.getPreferredTimes(best, early, late)
     print(arr)
