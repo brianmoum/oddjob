@@ -1,75 +1,113 @@
-import pandas as pd, requests, io, re, csv, datetime, sys, json, html, math
-
-import time, sched
-from datetime import date
-
-from bs4 import BeautifulSoup
-from selenium import webdriver
-from selenium.webdriver import Chrome
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.common.by import By
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.support.wait import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+import argparse
+import json
+import os
+import sys
+from datetime import date, datetime
 
 import ResyTimeFunctions as rtf
-import ResyRestaurantLookup as rrl
 import ResyDaemon as rd
 
-def getResyPage(url, times) :
-    print("function reached")
-    print(url)
-    print(times)
-    content = rd.getPage(url, times)
-    return content
 
-def print_event(name):
-    print('EVENT:', time.time(), name)
+def validate_config():
+    if not os.path.exists('config.json'):
+        print("Error: config.json not found.")
+        print("Create a config.json file with your Resy credentials:")
+        print('  {"username": "your@email.com", "password": "your_password"}')
+        sys.exit(1)
 
-def main() :
+    with open('config.json') as f:
+        try:
+            auth = json.load(f)
+        except json.JSONDecodeError:
+            print("Error: config.json is not valid JSON.")
+            sys.exit(1)
+
+    if "username" not in auth or "password" not in auth:
+        print("Error: config.json must contain 'username' and 'password' keys.")
+        sys.exit(1)
 
 
-    ## *** CONFIG ** ##
+def validate_date(date_str):
+    try:
+        res_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+    except ValueError:
+        print(f"Error: Invalid date format '{date_str}'. Use YYYY-MM-DD.")
+        sys.exit(1)
 
-    ## INPUTS FOR RESERVATION DETAILS ##
+    if res_date < date.today():
+        print(f"Error: Date '{date_str}' is in the past.")
+        sys.exit(1)
 
-    best = "7:00" ## Ideal time (will try to get as close to this time as possible)
-    early = "6:00" ## Earliest possible time
-    late = "9:30" ## latest possible time
-    restaurant_url_code = "lartusi-ny" ## Name of Restaurant (type carefully)
-    res_date = "2024-08-15" ## Date of Reservation (use format "YYYY-MM-DD")
-    num_people = 4 ## Number of people attending
+    return date_str
 
-    ## RUNTIME DETAILS ##
-    # TODO: Once cloud infra is set need to add a date field here
-    day = date.today()
-    t_test = "2:14:00"
-    t_lartusi = "08:59:58"
 
-    ## live time variable ##
-    t = t_test
-    ## live time variable ##
+def validate_times(best, earliest, latest):
+    n_best = rtf.timeToFloat(best)
+    n_earliest = rtf.timeToFloat(earliest)
+    n_latest = rtf.timeToFloat(latest)
 
-    runtime = time.strptime("{0} {1}".format(day, t), "%Y-%m-%d %H:%M:%S")
-    runtime_epoch = time.mktime(runtime)
-    print(runtime)
-    print(runtime_epoch)
+    if n_earliest > n_best:
+        print(f"Error: Earliest time ({earliest}) is after best time ({best}).")
+        sys.exit(1)
 
-    #s = sched.scheduler(time.time, time.sleep)
+    if n_best > n_latest:
+        print(f"Error: Best time ({best}) is after latest time ({latest}).")
+        sys.exit(1)
 
-    arr = rd.getPreferredTimes(best, early, late)
-    print(arr)
+    if n_earliest > n_latest:
+        print(f"Error: Earliest time ({earliest}) is after latest time ({latest}).")
+        sys.exit(1)
 
-    datestring = res_date
 
-    url1 = "https://resy.com/"
-    url2 = "https://resy.com/cities/new-york-ny/venues/{1}?seats={2}&date={0}".format(datestring, restaurant_url_code, num_people)
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="OddJob — Automated Resy reservation booker",
+        epilog="Example: python ResyInterface.py --restaurant lartusi-ny --date 2025-03-15 --guests 4 --best 7:00 --earliest 6:00 --latest 9:30"
+    )
+    parser.add_argument("--restaurant", required=True,
+                        help="Resy restaurant URL code (e.g. 'lartusi-ny')")
+    parser.add_argument("--date", required=True,
+                        help="Reservation date in YYYY-MM-DD format")
+    parser.add_argument("--guests", required=True, type=int,
+                        help="Number of guests")
+    parser.add_argument("--best", required=True,
+                        help="Ideal reservation time (e.g. '7:00')")
+    parser.add_argument("--earliest", required=True,
+                        help="Earliest acceptable time (e.g. '6:00')")
+    parser.add_argument("--latest", required=True,
+                        help="Latest acceptable time (e.g. '9:30')")
+    parser.add_argument("--city", default="new-york-ny",
+                        help="Resy city slug (default: 'new-york-ny')")
 
-    #content = s.enterabs(runtime_epoch, 1, getResyPage, argument=(url2, arr))
-    #content = s.enterabs(runtime_epoch, 1, print_event, argument=("x"))
+    args = parser.parse_args()
 
-    #s.run()
+    if args.guests < 1:
+        parser.error("Guest count must be at least 1.")
 
-    content = rd.getPage(url2, arr)
+    return args
+
+
+def main():
+    args = parse_args()
+
+    validate_config()
+    validate_date(args.date)
+    validate_times(args.best, args.earliest, args.latest)
+
+    preferred_times = rd.getPreferredTimes(args.best, args.earliest, args.latest)
+
+    url = "https://resy.com/cities/{0}/venues/{1}?seats={2}&date={3}".format(
+        args.city, args.restaurant, args.guests, args.date
+    )
+
+    print(f"Booking: {args.restaurant}")
+    print(f"  Date:   {args.date}")
+    print(f"  Guests: {args.guests}")
+    print(f"  Time:   {args.earliest} - {args.latest} (ideal: {args.best})")
+    print(f"  URL:    {url}")
+    print()
+
+    rd.getPage(url, preferred_times)
+
 
 main()
