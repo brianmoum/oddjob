@@ -1,62 +1,9 @@
 import argparse
-import json
-import os
 import sys
-from datetime import date, datetime
+import time
+from datetime import datetime
 
-import ResyTimeFunctions as rtf
-import ResyDaemon as rd
-
-
-def validate_config():
-    if not os.path.exists('config.json'):
-        print("Error: config.json not found.")
-        print("Create a config.json file with your Resy credentials:")
-        print('  {"username": "your@email.com", "password": "your_password"}')
-        sys.exit(1)
-
-    with open('config.json') as f:
-        try:
-            auth = json.load(f)
-        except json.JSONDecodeError:
-            print("Error: config.json is not valid JSON.")
-            sys.exit(1)
-
-    if "username" not in auth or "password" not in auth:
-        print("Error: config.json must contain 'username' and 'password' keys.")
-        sys.exit(1)
-
-
-def validate_date(date_str):
-    try:
-        res_date = datetime.strptime(date_str, "%Y-%m-%d").date()
-    except ValueError:
-        print(f"Error: Invalid date format '{date_str}'. Use YYYY-MM-DD.")
-        sys.exit(1)
-
-    if res_date < date.today():
-        print(f"Error: Date '{date_str}' is in the past.")
-        sys.exit(1)
-
-    return date_str
-
-
-def validate_times(best, earliest, latest):
-    n_best = rtf.timeToFloat(best)
-    n_earliest = rtf.timeToFloat(earliest)
-    n_latest = rtf.timeToFloat(latest)
-
-    if n_earliest > n_best:
-        print(f"Error: Earliest time ({earliest}) is after best time ({best}).")
-        sys.exit(1)
-
-    if n_best > n_latest:
-        print(f"Error: Best time ({best}) is after latest time ({latest}).")
-        sys.exit(1)
-
-    if n_earliest > n_latest:
-        print(f"Error: Earliest time ({earliest}) is after latest time ({latest}).")
-        sys.exit(1)
+from booking import run_booking
 
 
 def parse_args():
@@ -78,6 +25,8 @@ def parse_args():
                         help="Latest acceptable time (e.g. '9:30')")
     parser.add_argument("--city", default="new-york-ny",
                         help="Resy city slug (default: 'new-york-ny')")
+    parser.add_argument("--run-at",
+                        help="Schedule booking at a specific time (format: 'YYYY-MM-DD HH:MM:SS')")
 
     args = parser.parse_args()
 
@@ -87,27 +36,56 @@ def parse_args():
     return args
 
 
+def wait_until(run_at_str):
+    try:
+        run_at = datetime.strptime(run_at_str, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        print(f"Error: Invalid --run-at format '{run_at_str}'. Use 'YYYY-MM-DD HH:MM:SS'.")
+        sys.exit(1)
+
+    now = datetime.now()
+    if run_at <= now:
+        print(f"Error: --run-at time '{run_at_str}' is in the past.")
+        sys.exit(1)
+
+    wait_seconds = (run_at - now).total_seconds()
+    print(f"Scheduled to run at {run_at_str}")
+    print(f"Waiting {wait_seconds:.0f} seconds...")
+    print()
+
+    while True:
+        now = datetime.now()
+        remaining = (run_at - now).total_seconds()
+        if remaining <= 0:
+            break
+        if remaining > 60:
+            print(f"  {remaining:.0f}s remaining...", end="\r")
+            time.sleep(30)
+        elif remaining > 5:
+            print(f"  {remaining:.0f}s remaining...", end="\r")
+            time.sleep(1)
+        else:
+            time.sleep(remaining)
+            break
+
+    print("Executing booking now.                ")
+
+
 def main():
     args = parse_args()
 
-    validate_config()
-    validate_date(args.date)
-    validate_times(args.best, args.earliest, args.latest)
+    if args.run_at:
+        wait_until(args.run_at)
 
-    preferred_times = rd.getPreferredTimes(args.best, args.earliest, args.latest)
-
-    url = "https://resy.com/cities/{0}/venues/{1}?seats={2}&date={3}".format(
-        args.city, args.restaurant, args.guests, args.date
+    run_booking(
+        restaurant=args.restaurant,
+        res_date=args.date,
+        guests=args.guests,
+        best=args.best,
+        earliest=args.earliest,
+        latest=args.latest,
+        city=args.city,
     )
-
-    print(f"Booking: {args.restaurant}")
-    print(f"  Date:   {args.date}")
-    print(f"  Guests: {args.guests}")
-    print(f"  Time:   {args.earliest} - {args.latest} (ideal: {args.best})")
-    print(f"  URL:    {url}")
-    print()
-
-    rd.getPage(url, preferred_times)
 
 
 main()
