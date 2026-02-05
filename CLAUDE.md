@@ -8,9 +8,9 @@ OddJob is a Python-based automated restaurant reservation system. The core use c
 
 ## Project Direction
 
-**Current state**: Selenium-based browser automation (working but slow, prone to bot detection).
+**Current state**: API-based approach using Resy endpoints (`src/api/resy_client.py` + `src/cli.py`). Fast, reliable, serverless-compatible.
 
-**Target architecture**: API-based approach using community-derived Resy endpoints. This is faster, more reliable, and serverless-compatible.
+**Legacy**: Selenium-based browser automation in `src/web/` (deprecated).
 
 **Planned features**:
 - Serverless cloud deployment (jobs run without local machine)
@@ -24,24 +24,33 @@ OddJob is a Python-based automated restaurant reservation system. The core use c
 From the `src/` directory:
 
 ```bash
-# Book a reservation
-python interfaces/ResyInterface.py \
-  --restaurant lartusi-ny \
-  --date 2025-03-15 \
-  --guests 4 \
-  --best 7:00 \
-  --earliest 6:00 \
-  --latest 9:30
+# Book a reservation (API-based)
+python cli.py \
+  --venue-id 25973 \
+  --date 2026-02-19 \
+  --guests 2 \
+  --best 19:00 \
+  --earliest 18:00 \
+  --latest 21:00
 
-# Schedule a booking for a specific time (for release-day reservations)
-python interfaces/ResyInterface.py \
-  --restaurant lartusi-ny \
-  --date 2025-03-15 \
-  --guests 4 \
-  --best 7:00 \
-  --earliest 6:00 \
-  --latest 9:30 \
-  --run-at "2025-03-01 09:00:00"
+# Schedule a booking for release time
+python cli.py \
+  --venue-id 25973 \
+  --date 2026-02-19 \
+  --guests 2 \
+  --best 19:00 \
+  --earliest 18:00 \
+  --latest 21:00 \
+  --run-at "2026-02-05 09:00:00"
+
+# Test without actually booking
+python cli.py --venue-id 25973 --date 2026-02-19 --guests 2 \
+  --best 19:00 --earliest 18:00 --latest 21:00 --dry-run
+
+# Prefer specific table types
+python cli.py --venue-id 25973 --date 2026-02-19 --guests 2 \
+  --best 19:00 --earliest 18:00 --latest 21:00 \
+  --table-type "Indoor Dining" --table-type "Patio"
 ```
 
 ## Configuration
