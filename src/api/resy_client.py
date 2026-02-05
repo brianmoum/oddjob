@@ -34,6 +34,7 @@ class BookingDetails:
 class BookingResult:
     """Result of a successful booking."""
     resy_token: str
+    reservation_id: Optional[int] = None
 
 
 class ResyApiError(Exception):
@@ -212,7 +213,7 @@ class ResyClient:
             data=urlencode(payload),
         )
 
-        if response.status_code != 200:
+        if response.status_code not in (200, 201):
             raise ResyApiError(f"Booking failed: {response.status_code} {response.text}")
 
         data = response.json()
@@ -221,7 +222,10 @@ class ResyClient:
         if not resy_token:
             raise ResyApiError(f"Booking response missing resy_token: {data}")
 
-        return BookingResult(resy_token=resy_token)
+        return BookingResult(
+            resy_token=resy_token,
+            reservation_id=data.get("reservation_id"),
+        )
 
     def book(
         self,
