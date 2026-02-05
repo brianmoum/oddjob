@@ -60,6 +60,7 @@ class ResyClient:
         return {
             "Authorization": f'ResyAPI api_key="{self.api_key}"',
             "x-resy-auth-token": self.auth_token,
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
         }
 
     def _post_headers(self) -> dict:
