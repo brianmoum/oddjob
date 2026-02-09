@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-CLI for OddJob Resy reservation booking via API.
+CLI for OddJob automated restaurant reservation booking.
+
+Supports multiple platforms (Resy, OpenTable) via --platform flag (default: resy).
 
 Example usage:
     python cli.py --venue-id 25973 --date 2026-02-19 --guests 2 --best 19:00 --earliest 18:00 --latest 21:00
@@ -17,7 +19,9 @@ import time
 from datetime import datetime, date, timezone
 from pathlib import Path
 
-from api.resy_client import load_client_from_config, ResyApiError
+from api.base import BookingClientError
+from api.client_factory import load_client_from_config
+from api.slot_selection import select_best_slot
 
 
 # Default config path is in project root (parent of src/)
@@ -147,12 +151,13 @@ def validate_times(best: str, earliest: str, latest: str) -> None:
 
 
 def run_booking(
-    venue_id: int,
+    venue_id: str,
     res_date: str,
     party_size: int,
     best: str,
     earliest: str,
     latest: str,
+    platform: str = "resy",
     table_types: list[str] | None = None,
     retry_count: int = 3,
     retry_delay: float = 0.5,
@@ -170,6 +175,7 @@ def run_booking(
     preferred_times = generate_preferred_times(best, earliest, latest)
 
     print(f"Booking attempt:")
+    print(f"  Platform:    {platform}")
     print(f"  Venue ID:    {venue_id}")
     print(f"  Date:        {res_date}")
     print(f"  Party size:  {party_size}")
@@ -180,14 +186,18 @@ def run_booking(
     print()
 
     config_file = config_path or str(DEFAULT_CONFIG_PATH)
-    client = load_client_from_config(config_file)
+    try:
+        client = load_client_from_config(platform, config_file)
+    except BookingClientError as e:
+        print(f"Error: {e}")
+        return False
 
     for attempt in range(1, retry_count + 1):
         try:
             print(f"Attempt {attempt}/{retry_count}...")
 
             # Find available slots
-            slots = client.find_reservations(venue_id, res_date, party_size)
+            slots = client.find_slots(venue_id, res_date, party_size)
 
             if not slots:
                 print("  No slots available.")
@@ -197,32 +207,7 @@ def run_booking(
 
             print(f"  Found {len(slots)} available slots")
 
-            # Build lookup by time
-            slots_by_time = {}
-            for slot in slots:
-                if slot.time not in slots_by_time:
-                    slots_by_time[slot.time] = []
-                slots_by_time[slot.time].append(slot)
-
-            # Find best matching slot
-            selected_slot = None
-            for pref_time in preferred_times:
-                if pref_time in slots_by_time:
-                    available = slots_by_time[pref_time]
-
-                    if table_types:
-                        for table_type in table_types:
-                            for slot in available:
-                                if table_type.lower() in slot.table_type.lower():
-                                    selected_slot = slot
-                                    break
-                            if selected_slot:
-                                break
-
-                    if not selected_slot:
-                        selected_slot = available[0]
-
-                    break
+            selected_slot = select_best_slot(slots, preferred_times, table_types)
 
             if not selected_slot:
                 print("  No slots match preferred times.")
@@ -241,26 +226,19 @@ def run_booking(
                 print("=" * 50)
                 return True
 
-            # Get booking details
-            details = client.get_reservation_details(
-                selected_slot.config_token, res_date, party_size
-            )
-
-            # Book it
-            result = client.book_reservation(
-                details.book_token, details.payment_method_id
-            )
+            result = client.book_slot(selected_slot, res_date, party_size)
 
             print()
             print("=" * 50)
             print("SUCCESS! Reservation confirmed.")
-            print(f"  Reservation ID: {result.reservation_id}")
-            print(f"  Resy Token:     {result.resy_token[:40]}...")
+            print(f"  Confirmation: {result.confirmation_id[:40]}...")
+            if result.reservation_id:
+                print(f"  Reservation ID: {result.reservation_id}")
             print("=" * 50)
 
             return True
 
-        except ResyApiError as e:
+        except BookingClientError as e:
             print(f"  Error: {e}")
             if attempt < retry_count:
                 time.sleep(retry_delay)
@@ -290,12 +268,14 @@ def require_booking_args(args, parser):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="OddJob — Automated Resy reservation booker (API version)",
+        description="OddJob — Automated restaurant reservation booker",
         epilog="Example: python cli.py --venue-id 25973 --date 2026-02-19 --guests 2 --best 19:00 --earliest 18:00 --latest 21:00"
     )
     # Booking arguments (required for booking/scheduling, not for --list-jobs/--cancel-job)
-    parser.add_argument("--venue-id", type=int,
-                        help="Resy venue ID (numeric)")
+    parser.add_argument("--platform", choices=["resy", "opentable"], default="resy",
+                        help="Booking platform (default: resy)")
+    parser.add_argument("--venue-id", type=str,
+                        help="Venue ID (platform-specific)")
     parser.add_argument("--date",
                         help="Reservation date in YYYY-MM-DD format")
     parser.add_argument("--guests", type=int,
@@ -341,6 +321,7 @@ def main():
                 print(f"    Schedule: {s['schedule']}")
                 if s.get("payload"):
                     p = s["payload"]
+                    print(f"    Platform: {p.get('platform', 'resy')}")
                     print(f"    Venue:    {p.get('venue_id', '?')}")
                     print(f"    Date:     {p.get('date', '?')}")
                     print(f"    Guests:   {p.get('party_size', '?')}")
@@ -388,10 +369,12 @@ def main():
             run_at_utc=run_at_utc,
             table_types=args.table_types,
             retries=args.retries,
+            platform=args.platform,
         )
 
         print(f"Cloud job scheduled!")
         print(f"  Name:      {schedule_name}")
+        print(f"  Platform:  {args.platform}")
         print(f"  Fires at:  {args.schedule} local ({run_at_utc} UTC)")
         print(f"  Venue:     {args.venue_id}")
         print(f"  Date:      {args.date}")
@@ -412,6 +395,7 @@ def main():
         best=args.best,
         earliest=args.earliest,
         latest=args.latest,
+        platform=args.platform,
         table_types=args.table_types,
         retry_count=args.retries,
         config_path=args.config,

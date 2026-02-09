@@ -11,16 +11,10 @@ from dataclasses import dataclass
 from typing import Optional
 from urllib.parse import urlencode
 
+from .base import BookingClient, BookingClientError, Slot, BookingConfirmation
+
 
 BASE_URL = "https://api.resy.com"
-
-
-@dataclass
-class SlotInfo:
-    """Represents an available reservation slot."""
-    config_token: str
-    time: str  # HH:MM:SS format
-    table_type: str
 
 
 @dataclass
@@ -30,31 +24,23 @@ class BookingDetails:
     payment_method_id: int
 
 
-@dataclass
-class BookingResult:
-    """Result of a successful booking."""
-    resy_token: str
-    reservation_id: Optional[int] = None
+class ResyApiError(BookingClientError):
+    """Exception for Resy API errors."""
+
+    def __init__(self, message: str):
+        super().__init__(message, platform="resy")
 
 
-class ResyApiError(Exception):
-    """Base exception for Resy API errors."""
-    pass
-
-
-class ResyClient:
+class ResyClient(BookingClient):
     """Client for interacting with the Resy API."""
 
     def __init__(self, api_key: str, auth_token: str):
-        """
-        Initialize the Resy client.
-
-        Args:
-            api_key: Your Resy API key (from Authorization header in browser)
-            auth_token: Your Resy auth token (from x-resy-auth-token header in browser)
-        """
         self.api_key = api_key
         self.auth_token = auth_token
+
+    @property
+    def platform_name(self) -> str:
+        return "resy"
 
     def _headers(self) -> dict:
         """Build headers for API requests."""
@@ -78,7 +64,7 @@ class ResyClient:
         venue_id: int,
         date: str,
         party_size: int,
-    ) -> list[SlotInfo]:
+    ) -> list[Slot]:
         """
         Find available reservation slots for a venue.
 
@@ -88,7 +74,7 @@ class ResyClient:
             party_size: Number of guests
 
         Returns:
-            List of available SlotInfo objects, sorted by time
+            List of available Slot objects
 
         Raises:
             ResyApiError: If the API request fails
@@ -123,15 +109,21 @@ class ResyClient:
                 start_time = date_info.get("start", "")
                 time_part = start_time.split(" ")[1] if " " in start_time else start_time
 
-                slots.append(SlotInfo(
-                    config_token=config.get("token", ""),
+                slots.append(Slot(
+                    platform="resy",
+                    venue_id=str(venue_id),
                     time=time_part,
                     table_type=config.get("type", ""),
+                    platform_data={"config_token": config.get("token", "")},
                 ))
         except (KeyError, IndexError) as e:
             raise ResyApiError(f"Failed to parse reservation response: {e}")
 
         return slots
+
+    def find_slots(self, venue_id: str, date: str, party_size: int) -> list[Slot]:
+        """BookingClient interface — delegates to find_reservations."""
+        return self.find_reservations(int(venue_id), date, party_size)
 
     def get_reservation_details(
         self,
@@ -187,7 +179,7 @@ class ResyClient:
         self,
         book_token: str,
         payment_method_id: int,
-    ) -> BookingResult:
+    ) -> BookingConfirmation:
         """
         Complete a reservation booking.
 
@@ -196,7 +188,7 @@ class ResyClient:
             payment_method_id: The payment method ID from get_reservation_details
 
         Returns:
-            BookingResult with the confirmation resy_token
+            BookingConfirmation on success
 
         Raises:
             ResyApiError: If the booking fails
@@ -222,94 +214,18 @@ class ResyClient:
         if not resy_token:
             raise ResyApiError(f"Booking response missing resy_token: {data}")
 
-        return BookingResult(
-            resy_token=resy_token,
-            reservation_id=data.get("reservation_id"),
+        return BookingConfirmation(
+            platform="resy",
+            confirmation_id=resy_token,
+            reservation_id=str(data["reservation_id"]) if data.get("reservation_id") else None,
+            details={"resy_token": resy_token},
         )
 
-    def book(
-        self,
-        venue_id: int,
-        date: str,
-        party_size: int,
-        preferred_times: list[str],
-        preferred_table_types: Optional[list[str]] = None,
-    ) -> Optional[BookingResult]:
-        """
-        High-level method to find and book a reservation.
+    def book_slot(self, slot: Slot, date: str, party_size: int) -> BookingConfirmation:
+        """BookingClient interface — runs Resy's 3-step details+book flow."""
+        config_token = slot.platform_data.get("config_token")
+        if not config_token:
+            raise ResyApiError("Slot missing config_token in platform_data")
 
-        Attempts to book the first available slot matching the preferred times,
-        in order of preference.
-
-        Args:
-            venue_id: The unique identifier of the restaurant
-            date: Reservation date in YYYY-MM-DD format
-            party_size: Number of guests
-            preferred_times: List of times in HH:MM:SS format, ordered by preference
-            preferred_table_types: Optional list of table types (e.g., ["Dining Room", "Patio"])
-
-        Returns:
-            BookingResult if successful, None if no matching slots available
-
-        Raises:
-            ResyApiError: If an API call fails
-        """
-        slots = self.find_reservations(venue_id, date, party_size)
-
-        if not slots:
-            return None
-
-        # Build a lookup by time -> slots
-        slots_by_time = {}
-        for slot in slots:
-            if slot.time not in slots_by_time:
-                slots_by_time[slot.time] = []
-            slots_by_time[slot.time].append(slot)
-
-        # Find best matching slot
-        selected_slot = None
-        for time in preferred_times:
-            if time in slots_by_time:
-                available = slots_by_time[time]
-
-                if preferred_table_types:
-                    # Try to match table type preference
-                    for table_type in preferred_table_types:
-                        for slot in available:
-                            if table_type.lower() in slot.table_type.lower():
-                                selected_slot = slot
-                                break
-                        if selected_slot:
-                            break
-
-                if not selected_slot:
-                    # Take first available at this time
-                    selected_slot = available[0]
-
-                break
-
-        if not selected_slot:
-            return None
-
-        # Get booking details and complete reservation
-        details = self.get_reservation_details(selected_slot.config_token, date, party_size)
+        details = self.get_reservation_details(config_token, date, party_size)
         return self.book_reservation(details.book_token, details.payment_method_id)
-
-
-def load_client_from_config(config_path: str = "config.json") -> ResyClient:
-    """
-    Load a ResyClient from a config file.
-
-    Args:
-        config_path: Path to JSON config file with api_key and auth_token
-
-    Returns:
-        Configured ResyClient instance
-    """
-    with open(config_path) as f:
-        config = json.load(f)
-
-    return ResyClient(
-        api_key=config["api_key"],
-        auth_token=config["auth_token"],
-    )

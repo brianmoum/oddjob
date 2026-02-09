@@ -8,7 +8,7 @@ OddJob is a Python-based automated restaurant reservation system. The core use c
 
 ## Project Direction
 
-**Current state**: API-based approach using Resy endpoints (`src/api/resy_client.py` + `src/cli.py`). Fast, reliable, serverless-compatible.
+**Current state**: Multi-platform API-based approach with a shared `BookingClient` interface (`src/api/base.py`). Resy is fully implemented; OpenTable is stubbed out awaiting API capture. Fast, reliable, serverless-compatible.
 
 **Legacy**: Selenium-based browser automation in `src/web/` (deprecated).
 
@@ -16,16 +16,35 @@ OddJob is a Python-based automated restaurant reservation system. The core use c
 - Bulk job creation
 - Resy account rotation (create/manage multiple accounts to avoid bot detection)
 - SMS/mobile interface for creating jobs on the go
-- Multi-platform support (OpenTable, Sevenrooms, etc.)
+- OpenTable client implementation (stub exists, needs API capture from browser dev tools)
+- Additional platform support (Sevenrooms, etc.)
 
 ## Running the Application
 
 From the `src/` directory:
 
 ```bash
-# Book a reservation (API-based)
+# Book a reservation (Resy — default platform)
 python cli.py \
   --venue-id 25973 \
+  --date 2026-02-19 \
+  --guests 2 \
+  --best 19:00 \
+  --earliest 18:00 \
+  --latest 21:00
+
+# Explicit platform flag (same as above)
+python cli.py --platform resy \
+  --venue-id 25973 \
+  --date 2026-02-19 \
+  --guests 2 \
+  --best 19:00 \
+  --earliest 18:00 \
+  --latest 21:00
+
+# OpenTable (stub — not yet implemented, will error)
+python cli.py --platform opentable \
+  --venue-id some-venue-id \
   --date 2026-02-19 \
   --guests 2 \
   --best 19:00 \
@@ -67,18 +86,30 @@ aws-vault exec oddjob -- python cli.py \
   --latest 21:00 \
   --schedule "2026-02-27 09:00:00"
 
-# List all scheduled jobs
+# Schedule with explicit platform
+aws-vault exec oddjob -- python cli.py --platform resy \
+  --venue-id 25973 \
+  --date 2026-02-28 \
+  --guests 2 \
+  --best 19:00 \
+  --earliest 18:00 \
+  --latest 21:00 \
+  --schedule "2026-02-27 09:00:00"
+
+# List all scheduled jobs (shows platform in output)
 aws-vault exec oddjob -- python cli.py --list-jobs
 
 # Cancel a scheduled job
-aws-vault exec oddjob -- python cli.py --cancel-job oddjob-25973-2026-02-28-at-2026-02-27T14-00-00
+aws-vault exec oddjob -- python cli.py --cancel-job oddjob-resy-25973-2026-02-28-at-2026-02-27T14-00-00
 ```
 
 `--schedule` takes a local time and converts it to UTC for EventBridge. Schedules auto-delete after firing.
 
 ## Configuration
 
-Requires `config.json` in the working directory:
+Requires `config.json` in the project root. Supports two formats:
+
+**Legacy flat format** (Resy-only, backwards compatible):
 ```json
 {
   "api_key": "YOUR_RESY_API_KEY",
@@ -86,11 +117,34 @@ Requires `config.json` in the working directory:
 }
 ```
 
-**How to get credentials** (from browser dev tools while logged into Resy):
+**Multi-platform nested format**:
+```json
+{
+  "resy": {
+    "api_key": "YOUR_RESY_API_KEY",
+    "auth_token": "YOUR_RESY_AUTH_TOKEN"
+  },
+  "opentable": {
+    "...": "credentials TBD after API capture"
+  }
+}
+```
+
+### Getting Resy Credentials
+
+From browser dev tools while logged into Resy:
 - `api_key`: Found in `Authorization` header as `ResyAPI api_key="..."`
 - `auth_token`: Found in `x-resy-auth-token` header
+- `venue_id`: Visible in `/find` API calls or URL params when viewing a restaurant on Resy
 
-You also need `venue_id` for each restaurant (visible in `/find` API calls or URL params when viewing a restaurant on Resy).
+### Getting OpenTable Credentials (TODO)
+
+OpenTable client is stubbed but not yet implemented. To capture the API:
+1. Open browser dev tools (Network tab) while logged into OpenTable
+2. Search for a restaurant and select a date/time/party size
+3. Watch network requests — note endpoints, headers, and payloads
+4. Complete a booking and capture the booking request
+5. Fill in `src/api/opentable_client.py` with the captured API details
 
 ## Resy API Reference
 
@@ -127,21 +181,40 @@ Response contains `resy_token` on success.
 
 ## Architecture
 
-### API Client (New)
-`src/api/resy_client.py` - Direct API implementation:
-- `ResyClient` class with methods: `find_reservations()`, `get_reservation_details()`, `book_reservation()`
-- `book()` high-level method that combines all three steps with time preference matching
-- `load_client_from_config()` helper to load credentials from config.json
+### Multi-Platform Interface
+`src/api/base.py` - Shared interface:
+- `Slot` dataclass: platform-agnostic slot with `platform_data` dict for opaque platform-specific data
+- `BookingConfirmation` dataclass: platform-agnostic booking result
+- `BookingClientError` exception: base error with `platform` field
+- `BookingClient` ABC: `find_slots()` and `book_slot()` methods
+
+`src/api/slot_selection.py` - Shared slot selection:
+- `select_best_slot()` picks the best slot from any platform based on time/table type preferences
+
+`src/api/client_factory.py` - Client creation:
+- `create_client(platform, credentials)` creates the right client for a platform
+- `load_client_from_config(platform, config_path)` loads from config.json (supports legacy flat + nested formats)
+
+### Platform Clients
+`src/api/resy_client.py` - Resy API implementation:
+- `ResyClient` extends `BookingClient`
+- Internal methods: `find_reservations()`, `get_reservation_details()`, `book_reservation()`
+- Interface methods: `find_slots()` wraps find_reservations, `book_slot()` runs details+book flow
+
+`src/api/opentable_client.py` - OpenTable stub:
+- `OpenTableClient` extends `BookingClient`
+- Both methods raise `BookingClientError` until API is captured and implemented
 
 ### Cloud Scheduler
 `src/scheduler.py` - EventBridge Scheduler wrapper:
-- `schedule_booking()` creates a one-time `at()` schedule targeting the Lambda
+- `schedule_booking()` creates a one-time `at()` schedule targeting the Lambda, includes `platform` in payload
+- Schedule names include platform: `oddjob-{platform}-{venue_id}-{date}-at-{run_at_utc}`
 - `list_schedules()` lists all schedules in the `oddjob` group with payload details
 - `cancel_schedule()` deletes a schedule by name
 - Schedules auto-delete after firing (`ActionAfterCompletion="DELETE"`)
 
 ### Lambda Handler
-`src/lambda_handler.py` - AWS Lambda entry point invoked by EventBridge Scheduler. Reads Resy credentials from Secrets Manager and runs the booking flow.
+`src/lambda_handler.py` - AWS Lambda entry point invoked by EventBridge Scheduler. Reads `platform` from event (default: "resy"), fetches credentials from `oddjob/{platform}-credentials` in Secrets Manager, and runs the booking flow via the shared `BookingClient` interface.
 
 ### Legacy (Selenium)
 
@@ -171,8 +244,8 @@ Two IAM roles are needed (created manually in the AWS Console due to session tok
 2. **`oddjob-scheduler-role`** — EventBridge Scheduler role. Trust policy for `scheduler.amazonaws.com`, with permission to `lambda:InvokeFunction` on the Lambda.
 
 ### Resources
-- **Lambda**: `oddjob-resy-booker` (us-east-1)
-- **Secret**: `oddjob/resy-credentials` (Secrets Manager)
+- **Lambda**: `oddjob-resy-booker` (us-east-1) — handles all platforms
+- **Secrets** (Secrets Manager): `oddjob/resy-credentials`, `oddjob/opentable-credentials` (when implemented)
 - **Schedule Group**: `oddjob` (EventBridge Scheduler)
 
 Run `./deploy.sh` to deploy. It will print instructions for any missing roles.

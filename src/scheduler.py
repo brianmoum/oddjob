@@ -34,20 +34,20 @@ def _ensure_schedule_group(client):
             raise
 
 
-def _make_schedule_name(venue_id: int, date: str, run_at_utc: str) -> str:
+def _make_schedule_name(venue_id: str, date: str, run_at_utc: str, platform: str = "resy") -> str:
     """
     Generate a deterministic, readable schedule name.
 
-    Format: oddjob-{venue_id}-{date}-at-{run_at_utc}
-    E.g.: oddjob-25973-2026-02-28-at-2026-02-27T14-00-00
+    Format: oddjob-{platform}-{venue_id}-{date}-at-{run_at_utc}
+    E.g.: oddjob-resy-25973-2026-02-28-at-2026-02-27T14-00-00
     """
     # Replace colons with dashes for EventBridge name compatibility
     safe_run_at = run_at_utc.replace(":", "-")
-    return f"oddjob-{venue_id}-{date}-at-{safe_run_at}"
+    return f"oddjob-{platform}-{venue_id}-{date}-at-{safe_run_at}"
 
 
 def schedule_booking(
-    venue_id: int,
+    venue_id: str,
     date: str,
     party_size: int,
     best: str,
@@ -56,12 +56,13 @@ def schedule_booking(
     run_at_utc: str,
     table_types: list[str] | None = None,
     retries: int = 3,
+    platform: str = "resy",
 ) -> str:
     """
     Create a one-time EventBridge schedule that invokes the Lambda at run_at_utc.
 
     Args:
-        venue_id: Resy venue ID
+        venue_id: Platform-specific venue ID
         date: Reservation date (YYYY-MM-DD)
         party_size: Number of guests
         best: Ideal time (e.g., "19:00")
@@ -70,6 +71,7 @@ def schedule_booking(
         run_at_utc: UTC execution time (YYYY-MM-DDTHH:MM:SS)
         table_types: Optional preferred table types
         retries: Number of booking retry attempts
+        platform: Booking platform (default: "resy")
 
     Returns:
         The schedule name.
@@ -77,10 +79,11 @@ def schedule_booking(
     client = _get_client()
     _ensure_schedule_group(client)
 
-    schedule_name = _make_schedule_name(venue_id, date, run_at_utc)
+    schedule_name = _make_schedule_name(venue_id, date, run_at_utc, platform)
 
     # Build the Lambda payload (matches lambda_handler.py event format)
     payload = {
+        "platform": platform,
         "venue_id": venue_id,
         "date": date,
         "party_size": party_size,
