@@ -10,10 +10,11 @@ With scheduling:
 """
 
 import argparse
+import json
 import os
 import sys
 import time
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from pathlib import Path
 
 from api.resy_client import load_client_from_config, ResyApiError
@@ -269,27 +270,46 @@ def run_booking(
     return False
 
 
+def require_booking_args(args, parser):
+    """Validate that all booking-related arguments are present."""
+    required = {
+        "--venue-id": args.venue_id,
+        "--date": args.date,
+        "--guests": args.guests,
+        "--best": args.best,
+        "--earliest": args.earliest,
+        "--latest": args.latest,
+    }
+    missing = [name for name, val in required.items() if val is None]
+    if missing:
+        parser.error(f"the following arguments are required: {', '.join(missing)}")
+
+    if args.guests < 1:
+        parser.error("Guest count must be at least 1.")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="OddJob — Automated Resy reservation booker (API version)",
         epilog="Example: python cli.py --venue-id 25973 --date 2026-02-19 --guests 2 --best 19:00 --earliest 18:00 --latest 21:00"
     )
-    parser.add_argument("--venue-id", required=True, type=int,
+    # Booking arguments (required for booking/scheduling, not for --list-jobs/--cancel-job)
+    parser.add_argument("--venue-id", type=int,
                         help="Resy venue ID (numeric)")
-    parser.add_argument("--date", required=True,
+    parser.add_argument("--date",
                         help="Reservation date in YYYY-MM-DD format")
-    parser.add_argument("--guests", required=True, type=int,
+    parser.add_argument("--guests", type=int,
                         help="Number of guests")
-    parser.add_argument("--best", required=True,
+    parser.add_argument("--best",
                         help="Ideal reservation time (e.g., '19:00')")
-    parser.add_argument("--earliest", required=True,
+    parser.add_argument("--earliest",
                         help="Earliest acceptable time (e.g., '18:00')")
-    parser.add_argument("--latest", required=True,
+    parser.add_argument("--latest",
                         help="Latest acceptable time (e.g., '21:00')")
     parser.add_argument("--table-type", action="append", dest="table_types",
                         help="Preferred table type (can specify multiple, e.g., --table-type 'Indoor Dining' --table-type 'Patio')")
     parser.add_argument("--run-at",
-                        help="Schedule booking at a specific time (format: 'YYYY-MM-DD HH:MM:SS')")
+                        help="Schedule booking locally at a specific time (format: 'YYYY-MM-DD HH:MM:SS')")
     parser.add_argument("--retries", type=int, default=3,
                         help="Number of retry attempts (default: 3)")
     parser.add_argument("--config", default=str(DEFAULT_CONFIG_PATH),
@@ -297,10 +317,90 @@ def main():
     parser.add_argument("--dry-run", action="store_true",
                         help="Find and select a slot but don't actually book")
 
+    # Cloud scheduling arguments
+    parser.add_argument("--schedule",
+                        help="Create a cloud-scheduled job via EventBridge (local time, format: 'YYYY-MM-DD HH:MM:SS')")
+    parser.add_argument("--list-jobs", action="store_true",
+                        help="List all cloud-scheduled jobs")
+    parser.add_argument("--cancel-job",
+                        help="Cancel a cloud-scheduled job by name")
+
     args = parser.parse_args()
 
-    if args.guests < 1:
-        parser.error("Guest count must be at least 1.")
+    # Handle cloud scheduling commands (no booking args required)
+    if args.list_jobs:
+        from scheduler import list_schedules
+        schedules = list_schedules()
+        if not schedules:
+            print("No scheduled jobs.")
+        else:
+            print(f"Scheduled jobs ({len(schedules)}):\n")
+            for s in schedules:
+                print(f"  {s['name']}")
+                print(f"    State:    {s['state']}")
+                print(f"    Schedule: {s['schedule']}")
+                if s.get("payload"):
+                    p = s["payload"]
+                    print(f"    Venue:    {p.get('venue_id', '?')}")
+                    print(f"    Date:     {p.get('date', '?')}")
+                    print(f"    Guests:   {p.get('party_size', '?')}")
+                    print(f"    Time:     {p.get('earliest', '?')}-{p.get('latest', '?')} (best: {p.get('best', '?')})")
+                print()
+        sys.exit(0)
+
+    if args.cancel_job:
+        from scheduler import cancel_schedule
+        try:
+            cancel_schedule(args.cancel_job)
+            print(f"Cancelled: {args.cancel_job}")
+        except Exception as e:
+            print(f"Error cancelling job: {e}")
+            sys.exit(1)
+        sys.exit(0)
+
+    # For booking and scheduling, all booking args are required
+    require_booking_args(args, parser)
+
+    if args.schedule:
+        from scheduler import schedule_booking
+        # Convert local time to UTC
+        try:
+            local_dt = datetime.strptime(args.schedule, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            print(f"Error: Invalid --schedule format '{args.schedule}'. Use 'YYYY-MM-DD HH:MM:SS'.")
+            sys.exit(1)
+
+        local_dt = local_dt.astimezone()  # attach local timezone
+        utc_dt = local_dt.astimezone(timezone.utc)
+        run_at_utc = utc_dt.strftime("%Y-%m-%dT%H:%M:%S")
+
+        if utc_dt <= datetime.now(timezone.utc):
+            print(f"Error: --schedule time '{args.schedule}' is in the past.")
+            sys.exit(1)
+
+        schedule_name = schedule_booking(
+            venue_id=args.venue_id,
+            date=args.date,
+            party_size=args.guests,
+            best=args.best,
+            earliest=args.earliest,
+            latest=args.latest,
+            run_at_utc=run_at_utc,
+            table_types=args.table_types,
+            retries=args.retries,
+        )
+
+        print(f"Cloud job scheduled!")
+        print(f"  Name:      {schedule_name}")
+        print(f"  Fires at:  {args.schedule} local ({run_at_utc} UTC)")
+        print(f"  Venue:     {args.venue_id}")
+        print(f"  Date:      {args.date}")
+        print(f"  Guests:    {args.guests}")
+        print(f"  Time:      {args.earliest}-{args.latest} (best: {args.best})")
+        print()
+        print("The schedule will auto-delete after firing.")
+        print("To cancel: python cli.py --cancel-job " + schedule_name)
+        sys.exit(0)
 
     if args.run_at:
         wait_until(args.run_at)
